@@ -7,17 +7,34 @@ namespace AluminaDetection.Api.Services;
 public class AnodeEffectPredictor : IAnodeEffectPredictor
 {
     private readonly AppDbContext _db;
+    private readonly ILogger<AnodeEffectPredictor> _logger;
 
     private List<DecisionTree>? _forest;
     private bool _isTrained;
+    private DateTime _lastTrainingTime = DateTime.MinValue;
 
     private const int TreeCount = 10;
     private const int MaxDepth = 5;
     private const int MinSamplesLeaf = 5;
+    private const double AccuracyDropThreshold = 0.15;
+    private const double MinAccuracyForProduction = 0.70;
+    private const int EvaluationWindowSize = 50;
 
-    public AnodeEffectPredictor(AppDbContext db)
+    private readonly ConcurrentQueue<PredictionRecord> _recentPredictions = new();
+    private double _lastEvaluatedAccuracy = 1.0;
+
+    private sealed class PredictionRecord
+    {
+        public required int PotId { get; init; }
+        public required double PredictedProbability { get; init; }
+        public required DateTime PredictionTime { get; init; }
+        public bool? ActualOutcome { get; set; }
+    }
+
+    public AnodeEffectPredictor(AppDbContext db, ILogger<AnodeEffectPredictor> logger)
     {
         _db = db;
+        _logger = logger;
     }
 
     public async Task<double> PredictAsync(int potId)
@@ -44,6 +61,16 @@ public class AnodeEffectPredictor : IAnodeEffectPredictor
         }
 
         double probability = sum / _forest.Count;
+
+        _recentPredictions.Enqueue(new PredictionRecord
+        {
+            PotId = potId,
+            PredictedProbability = probability,
+            PredictionTime = DateTime.UtcNow
+        });
+
+        TrimPredictionWindow();
+
         return Math.Clamp(probability, 0.0, 1.0);
     }
 
@@ -85,6 +112,7 @@ public class AnodeEffectPredictor : IAnodeEffectPredictor
         }
 
         _isTrained = true;
+        _lastTrainingTime = DateTime.UtcNow;
     }
 
     public async Task<ModelTrainingResult> RetrainModelAsync()
@@ -93,17 +121,122 @@ public class AnodeEffectPredictor : IAnodeEffectPredictor
         await TrainModelAsync();
         sw.Stop();
 
+        var accuracy = await EvaluateModelAccuracyAsync();
+        _lastEvaluatedAccuracy = accuracy;
+
+        _logger.LogInformation(
+            "RF重训练完成. 树数={Trees}, 评估准确率={Accuracy:P1}, 耗时={Duration}ms",
+            _forest?.Count ?? 0, accuracy, sw.ElapsedMilliseconds);
+
         return new ModelTrainingResult
         {
             SampleCount = _forest?.Count ?? 0,
-            Metric = _isTrained ? 0.90 : 0,
+            Metric = accuracy,
             TrainingDurationMs = sw.ElapsedMilliseconds
         };
     }
 
+    public async Task<bool> CheckAndAutoRetrainIfNeededAsync()
+    {
+        var accuracy = await EvaluateModelAccuracyAsync();
+        _lastEvaluatedAccuracy = accuracy;
+
+        bool needsRetrain = false;
+
+        if (accuracy < MinAccuracyForProduction)
+        {
+            _logger.LogWarning(
+                "RF模型准确率{Accuracy:P1}低于阈值{Threshold:P1}，触发自动重训练",
+                accuracy, MinAccuracyForProduction);
+            needsRetrain = true;
+        }
+
+        if (_lastEvaluatedAccuracy > 0 && accuracy < _lastEvaluatedAccuracy - AccuracyDropThreshold)
+        {
+            _logger.LogWarning(
+                "RF模型准确率从{Previous:P1}下降至{Current:P1}，降幅超过{Drop:P1}，触发自动重训练",
+                _lastEvaluatedAccuracy, accuracy, AccuracyDropThreshold);
+            needsRetrain = true;
+        }
+
+        if (_isTrained && (DateTime.UtcNow - _lastTrainingTime).TotalHours > 2)
+        {
+            _logger.LogInformation("RF模型已超过2小时未重训练，触发定期重训练");
+            needsRetrain = true;
+        }
+
+        if (needsRetrain)
+        {
+            try
+            {
+                await RetrainModelAsync();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "RF自动重训练失败");
+            }
+        }
+
+        return false;
+    }
+
+    public double GetCurrentAccuracy() => _lastEvaluatedAccuracy;
+
+    public DateTime GetLastTrainingTime() => _lastTrainingTime;
+
+    private async Task<double> EvaluateModelAccuracyAsync()
+    {
+        var recentAlarms = await _db.AlarmRecords
+            .Where(a => a.AlarmType == "AnodeEffect" && a.CreatedAt >= DateTime.UtcNow.AddHours(-1))
+            .ToListAsync();
+
+        var resolvedPredictions = new List<(double Predicted, bool Actual)>();
+
+        foreach (var pred in _recentPredictions)
+        {
+            bool actualEffect = recentAlarms.Any(a =>
+                a.PotId == pred.PotId &&
+                Math.Abs((a.CreatedAt - pred.PredictionTime).TotalMinutes) < 3);
+
+            pred.ActualOutcome = actualEffect;
+            resolvedPredictions.Add((pred.PredictedProbability, actualEffect));
+        }
+
+        if (resolvedPredictions.Count < 5)
+            return 1.0;
+
+        int correct = 0;
+        foreach (var (predicted, actual) in resolvedPredictions)
+        {
+            bool predictedPositive = predicted > 0.5;
+            if (predictedPositive == actual)
+                correct++;
+        }
+
+        return (double)correct / resolvedPredictions.Count;
+    }
+
+    private void TrimPredictionWindow()
+    {
+        while (_recentPredictions.Count > EvaluationWindowSize * 2)
+        {
+            _recentPredictions.TryDequeue(out _);
+        }
+    }
+
     private static double[] FeatureVector(VoltageFeature f)
     {
-        return [f.NoisePower, f.StdVoltage, f.FrequencyPeak, f.MeanVoltage];
+        return [
+            f.NoisePower,
+            f.StdVoltage,
+            f.FrequencyPeak,
+            f.MeanVoltage,
+            f.DominantFrequencyAmplitude,
+            f.HighFrequencyNoiseRatio,
+            f.SpectralEnergyRatio,
+            f.SpectralBandwidth
+        ];
     }
 
     private static List<(double[] Input, int Label)> BootstrapSample(
@@ -219,7 +352,8 @@ public class AnodeEffectPredictor : IAnodeEffectPredictor
 
         double logit = 2.0 * (latestFeature.NoisePower - 0.5)
                      + 1.5 * (latestFeature.StdVoltage - 0.3)
-                     + latestFeature.FrequencyPeak * 0.5;
+                     + latestFeature.FrequencyPeak * 0.5
+                     + 3.0 * latestFeature.HighFrequencyNoiseRatio;
 
         double probability = Sigmoid(logit);
         return Math.Clamp(probability, 0.0, 1.0);

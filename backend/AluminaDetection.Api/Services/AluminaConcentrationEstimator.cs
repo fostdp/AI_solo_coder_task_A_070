@@ -38,11 +38,6 @@ public class AluminaConcentrationEstimator : IAluminaConcentrationEstimator
             .Take(2000)
             .ToListAsync();
 
-        var featureTimes = features.Select(f => f.ExtractedAt).ToHashSet();
-        var matchedConcs = concentrations
-            .Where(c => featureTimes.Any(ft => Math.Abs((ft - c.RecordedAt).TotalMinutes) < 2))
-            .ToList();
-
         var trainingPairs = new List<(double[] Input, double Label)>();
         foreach (var f in features)
         {
@@ -133,7 +128,19 @@ public class AluminaConcentrationEstimator : IAluminaConcentrationEstimator
 
     private static double[] FeatureVector(VoltageFeature f)
     {
-        return [f.MeanVoltage, f.StdVoltage, f.Skewness, f.Kurtosis, f.FrequencyPeak, f.NoisePower];
+        return [
+            f.MeanVoltage,
+            f.StdVoltage,
+            f.Skewness,
+            f.Kurtosis,
+            f.FrequencyPeak,
+            f.NoisePower,
+            f.DominantFrequencyAmplitude,
+            f.SpectralEnergyRatio,
+            f.HighFrequencyNoiseRatio,
+            f.SpectralCentroid,
+            f.SpectralBandwidth
+        ];
     }
 
     private double[][] NormalizeInputs(double[][] inputs)
@@ -288,7 +295,9 @@ public class AluminaConcentrationEstimator : IAluminaConcentrationEstimator
     {
         double concentration = 3.0
             - 0.5 * (f.StdVoltage / 0.1)
-            - 0.3 * (f.Skewness / 0.5);
+            - 0.3 * (f.Skewness / 0.5)
+            - 0.4 * f.HighFrequencyNoiseRatio
+            + 0.2 * f.SpectralEnergyRatio;
         return Math.Clamp(concentration, 1.5, 4.0);
     }
 }

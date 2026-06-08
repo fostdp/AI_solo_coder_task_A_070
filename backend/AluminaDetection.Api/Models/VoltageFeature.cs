@@ -24,6 +24,16 @@ public class VoltageFeature
 
     public double NoisePower { get; set; }
 
+    public double DominantFrequencyAmplitude { get; set; }
+
+    public double SpectralEnergyRatio { get; set; }
+
+    public double HighFrequencyNoiseRatio { get; set; }
+
+    public double SpectralCentroid { get; set; }
+
+    public double SpectralBandwidth { get; set; }
+
     public DateTime WindowStart { get; set; }
 
     public DateTime WindowEnd { get; set; }

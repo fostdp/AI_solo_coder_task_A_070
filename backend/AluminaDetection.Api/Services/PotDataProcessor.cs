@@ -21,6 +21,43 @@ public class PotDataProcessor : IPotDataProcessor
 
     private static readonly ConcurrentDictionary<int, DateTime> _lastFeatureExtraction = new();
 
+    private static readonly ConcurrentDictionary<int, ReaderWriterLockSlim> _potLocks = new();
+    private static readonly ConcurrentDictionary<int, PotDataBuffer> _potBuffers = new();
+
+    private sealed class PotDataBuffer
+    {
+        public double Voltage;
+        public double PotTemperature;
+        public double BathTemperature;
+        public double AluminumLevel;
+        public double BathLevel;
+        public string AnodeCurrentDistribution = string.Empty;
+        public double EstimatedConcentration;
+        public double AnodeEffectProbability;
+        public DateTime LastUpdateTime;
+    }
+
+    private static ReaderWriterLockSlim GetPotLock(int potId)
+    {
+        return _potLocks.GetOrAdd(potId, _ => new ReaderWriterLockSlim());
+    }
+
+    private static PotDataBuffer GetPotBuffer(int potId)
+    {
+        return _potBuffers.GetOrAdd(potId, _ => new PotDataBuffer
+        {
+            Voltage = 4.2,
+            PotTemperature = 960,
+            BathTemperature = 965,
+            AluminumLevel = 25,
+            BathLevel = 22,
+            AnodeCurrentDistribution = "[]",
+            EstimatedConcentration = 3.0,
+            AnodeEffectProbability = 0.0,
+            LastUpdateTime = DateTime.MinValue
+        });
+    }
+
     public PotDataProcessor(
         AppDbContext db,
         IVoltageFeatureExtractor featureExtractor,
@@ -47,6 +84,25 @@ public class PotDataProcessor : IPotDataProcessor
 
     public async Task ProcessIncomingDataAsync(ZigBeeDataDto data)
     {
+        var potLock = GetPotLock(data.PotId);
+        var buffer = GetPotBuffer(data.PotId);
+
+        potLock.EnterWriteLock();
+        try
+        {
+            buffer.Voltage = data.Voltage;
+            buffer.AnodeCurrentDistribution = data.AnodeCurrentDistribution;
+            buffer.PotTemperature = data.PotTemperature;
+            buffer.BathTemperature = data.BathTemperature;
+            buffer.AluminumLevel = data.AluminumLevel;
+            buffer.BathLevel = data.BathLevel;
+            buffer.LastUpdateTime = DateTime.UtcNow;
+        }
+        finally
+        {
+            potLock.ExitWriteLock();
+        }
+
         var realtimeData = new PotRealtimeData
         {
             PotId = data.PotId,
@@ -74,6 +130,17 @@ public class PotDataProcessor : IPotDataProcessor
 
                 var estimatedConc = await _concentrationEstimator.EstimateAsync(data.PotId);
                 var effectProb = await _anodeEffectPredictor.PredictAsync(data.PotId);
+
+                potLock.EnterWriteLock();
+                try
+                {
+                    buffer.EstimatedConcentration = estimatedConc;
+                    buffer.AnodeEffectProbability = effectProb;
+                }
+                finally
+                {
+                    potLock.ExitWriteLock();
+                }
 
                 var latestData = await _db.PotRealtimeData
                     .Where(r => r.PotId == data.PotId)
@@ -173,10 +240,28 @@ public class PotDataProcessor : IPotDataProcessor
         var pot = await _db.PotInfos.FindAsync(potId);
         if (pot == null) return null;
 
-        var latestData = await _db.PotRealtimeData
-            .Where(r => r.PotId == potId)
-            .OrderByDescending(r => r.RecordedAt)
-            .FirstOrDefaultAsync();
+        var buffer = GetPotBuffer(potId);
+        var potLock = GetPotLock(potId);
+
+        double voltage, potTemp, bathTemp, alLevel, bathLevel, estConc, effectProb;
+        DateTime lastUpdate;
+
+        potLock.EnterReadLock();
+        try
+        {
+            voltage = buffer.Voltage;
+            potTemp = buffer.PotTemperature;
+            bathTemp = buffer.BathTemperature;
+            alLevel = buffer.AluminumLevel;
+            bathLevel = buffer.BathLevel;
+            estConc = buffer.EstimatedConcentration;
+            effectProb = buffer.AnodeEffectProbability;
+            lastUpdate = buffer.LastUpdateTime;
+        }
+        finally
+        {
+            potLock.ExitReadLock();
+        }
 
         return new PotStatusDto
         {
@@ -184,16 +269,16 @@ public class PotDataProcessor : IPotDataProcessor
             PotCode = pot.PotCode,
             RowIndex = pot.RowIndex,
             ColIndex = pot.ColIndex,
-            AluminaConcentration = latestData?.AluminaConcentration ?? 0,
-            EstimatedConcentration = latestData?.EstimatedConcentration ?? 0,
-            AnodeEffectProbability = latestData?.AnodeEffectProbability ?? 0,
-            LastVoltage = latestData?.Voltage ?? 0,
-            PotTemperature = latestData?.PotTemperature ?? 0,
-            BathTemperature = latestData?.BathTemperature ?? 0,
-            AluminumLevel = latestData?.AluminumLevel ?? 0,
-            BathLevel = latestData?.BathLevel ?? 0,
+            AluminaConcentration = estConc,
+            EstimatedConcentration = estConc,
+            AnodeEffectProbability = effectProb,
+            LastVoltage = voltage,
+            PotTemperature = potTemp,
+            BathTemperature = bathTemp,
+            AluminumLevel = alLevel,
+            BathLevel = bathLevel,
             Status = pot.Status,
-            LastUpdateTime = latestData?.RecordedAt ?? DateTime.MinValue
+            LastUpdateTime = lastUpdate == DateTime.MinValue ? pot.CreatedAt : lastUpdate
         };
     }
 }
