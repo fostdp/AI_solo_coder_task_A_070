@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>电解铝氧化铝浓度在线检测与槽控优化系统</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/7.0.5/signalr.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#1a1a2e;color:#e0e0e0;font-family:'Microsoft YaHei','Segoe UI',sans-serif;overflow:hidden;height:100vh;display:flex;flex-direction:column;}
+
+.header{background:linear-gradient(135deg,#0f3460,#16213e);padding:10px 24px;display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #0f3460;flex-shrink:0;min-height:56px;}
+.header h1{font-size:20px;color:#e94560;text-shadow:0 0 10px rgba(233,69,96,0.3);letter-spacing:2px;}
+.header-stats{display:flex;gap:20px;align-items:center;}
+.stat-item{text-align:center;}
+.stat-item .label{font-size:11px;color:#8888aa;margin-bottom:2px;}
+.stat-item .value{font-size:18px;font-weight:bold;}
+.stat-item .value.green{color:#4CAF50;}
+.stat-item .value.yellow{color:#FFC107;}
+.stat-item .value.orange{color:#FF9800;}
+.stat-item .value.red{color:#F44336;}
+.header-time{font-size:14px;color:#8888aa;font-variant-numeric:tabular-nums;}
+
+.main{display:flex;flex:1;overflow:hidden;}
+.canvas-area{flex:1;position:relative;display:flex;flex-direction:column;overflow:hidden;}
+.canvas-wrapper{flex:1;overflow:auto;padding:10px;display:flex;justify-content:center;align-items:flex-start;}
+canvas#workshop{border-radius:8px;background:#12122a;box-shadow:0 0 20px rgba(0,0,0,0.5);}
+.legend{display:flex;gap:16px;justify-content:center;padding:8px;background:#16213e;border-top:1px solid #0f3460;flex-shrink:0;}
+.legend-item{display:flex;align-items:center;gap:6px;font-size:12px;}
+.legend-color{width:16px;height:12px;border-radius:3px;}
+
+.alarm-panel{width:320px;background:#16213e;border-left:2px solid #0f3460;display:flex;flex-direction:column;flex-shrink:0;}
+.alarm-header{padding:12px 16px;font-size:15px;font-weight:bold;border-bottom:1px solid #0f3460;display:flex;align-items:center;justify-content:space-between;}
+.alarm-header .badge{background:#e94560;color:#fff;border-radius:10px;padding:2px 8px;font-size:12px;}
+.alarm-list{flex:1;overflow-y:auto;padding:8px;}
+.alarm-item{padding:10px 12px;margin-bottom:6px;border-radius:6px;cursor:pointer;transition:background 0.2s;border-left:3px solid transparent;}
+.alarm-item:hover{background:rgba(255,255,255,0.05);}
+.alarm-item.level1{border-left-color:#FF9800;background:rgba(255,152,0,0.08);}
+.alarm-item.level2{border-left-color:#F44336;background:rgba(244,67,54,0.08);}
+.alarm-item.level2 .alarm-icon{animation:flash-icon 0.8s infinite;}
+.alarm-item .alarm-top{display:flex;align-items:center;gap:8px;margin-bottom:4px;}
+.alarm-icon{font-size:16px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:50%;}
+.alarm-icon.l1{background:rgba(255,152,0,0.2);color:#FF9800;}
+.alarm-icon.l2{background:rgba(244,67,54,0.2);color:#F44336;}
+.alarm-pot{font-weight:bold;font-size:13px;}
+.alarm-type{font-size:11px;color:#aaa;margin-left:auto;}
+.alarm-msg{font-size:12px;color:#ccc;margin-left:32px;}
+.alarm-time{font-size:11px;color:#666;margin-left:32px;margin-top:2px;}
+.alarm-empty{text-align:center;color:#555;padding:40px 10px;font-size:13px;}
+
+.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:1000;display:none;justify-content:center;align-items:center;}
+.modal-overlay.active{display:flex;}
+.modal{background:#1a1a2e;border:1px solid #0f3460;border-radius:12px;width:820px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.5);}
+.modal-header{padding:16px 20px;border-bottom:1px solid #0f3460;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#1a1a2e;z-index:1;border-radius:12px 12px 0 0;}
+.modal-header h2{font-size:16px;}
+.modal-close{background:none;border:1px solid #444;color:#aaa;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;transition:all 0.2s;}
+.modal-close:hover{background:#e94560;color:#fff;border-color:#e94560;}
+.modal-body{padding:16px 20px;}
+.modal-info{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px;}
+.info-card{background:#16213e;padding:12px;border-radius:8px;text-align:center;}
+.info-card .info-label{font-size:11px;color:#8888aa;margin-bottom:4px;}
+.info-card .info-value{font-size:20px;font-weight:bold;}
+.info-card .info-value.green{color:#4CAF50;}
+.info-card .info-value.yellow{color:#FFC107;}
+.info-card .info-value.orange{color:#FF9800;}
+.info-card .info-value.red{color:#F44336;}
+.chart-section{margin-bottom:16px;}
+.chart-title{font-size:13px;color:#8888aa;margin-bottom:8px;padding-left:4px;}
+.chart-container{background:#12122a;border-radius:8px;padding:8px;}
+.chart-container canvas{width:100%!important;height:200px!important;}
+.feedings-table{width:100%;border-collapse:collapse;font-size:12px;}
+.feedings-table th{background:#0f3460;padding:8px 10px;text-align:left;color:#8888aa;font-weight:normal;border-bottom:1px solid #1a3a6e;}
+.feedings-table td{padding:7px 10px;border-bottom:1px solid rgba(255,255,255,0.04);}
+.feedings-table tr:hover td{background:rgba(255,255,255,0.02);}
+
+@keyframes flash-icon{0%,100%{opacity:1;}50%{opacity:0.3;}}
+@keyframes pulse-border{0%,100%{border-color:rgba(244,67,54,0.3);}50%{border-color:rgba(244,67,54,1);}}
+
+::-webkit-scrollbar{width:6px;}
+::-webkit-scrollbar-track{background:#1a1a2e;}
+::-webkit-scrollbar-thumb{background:#0f3460;border-radius:3px;}
+::-webkit-scrollbar-thumb:hover{background:#1a4a80;}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>电解铝氧化铝浓度在线检测与槽控优化系统</h1>
+  <div class="header-stats">
+    <div class="stat-item"><div class="label">总槽数</div><div class="value" id="statTotal">200</div></div>
+    <div class="stat-item"><div class="label">正常</div><div class="value green" id="statNormal">0</div></div>
+    <div class="stat-item"><div class="label">偏低</div><div class="value yellow" id="statLow">0</div></div>
+    <div class="stat-item"><div class="label">极低</div><div class="value orange" id="statVeryLow">0</div></div>
+    <div class="stat-item"><div class="label">危险</div><div class="value red" id="statCritical">0</div></div>
+    <div class="stat-item"><div class="label">活跃报警</div><div class="value red" id="statAlarms">0</div></div>
+  </div>
+  <div class="header-time" id="headerTime">--</div>
+</div>
+
+<div class="main">
+  <div class="canvas-area">
+    <div class="canvas-wrapper">
+      <canvas id="workshop"></canvas>
+    </div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-color" style="background:#4CAF50;"></div>正常 (≥2.5%)</div>
+      <div class="legend-item"><div class="legend-color" style="background:#FFC107;"></div>偏低 (1.8%-2.5%)</div>
+      <div class="legend-item"><div class="legend-color" style="background:#FF9800;"></div>极低 (1.5%-1.8%)</div>
+      <div class="legend-item"><div class="legend-color" style="background:#F44336;"></div>危险 (&lt;1.5%)</div>
+      <div class="legend-item"><div class="legend-color" style="border:2px solid #F44336;background:transparent;animation:flash-icon 0.8s infinite;"></div>阳极效应预警 (&gt;80%)</div>
+    </div>
+  </div>
+
+  <div class="alarm-panel">
+    <div class="alarm-header">
+      <span>实时报警</span>
+      <span class="badge" id="alarmCount">0</span>
+    </div>
+    <div class="alarm-list" id="alarmList">
+      <div class="alarm-empty">暂无活跃报警</div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="modalTitle">槽详情</h2>
+      <button class="modal-close" id="modalClose">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-info" id="modalInfo"></div>
+      <div class="chart-section">
+        <div class="chart-title">电压趋势 (近8小时)</div>
+        <div class="chart-container"><canvas id="voltageChart"></canvas></div>
+      </div>
+      <div class="chart-section">
+        <div class="chart-title">阳极电流分布 (近8小时)</div>
+        <div class="chart-container"><canvas id="currentChart"></canvas></div>
+      </div>
+      <div class="chart-section">
+        <div class="chart-title">最近10次下料记录</div>
+        <table class="feedings-table">
+          <thead><tr><th>下料时间</th><th>下料量(kg)</th><th>下料类型</th><th>操作员</th></tr></thead>
+          <tbody id="feedingsBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var ROWS = 10, COLS = 20, POT_W = 40, POT_H = 30, GAP = 6, RADIUS = 4;
+  var LABEL_LEFT = 50, LABEL_TOP = 28;
+  var pots = [];
+  var alarms = [];
+  var flashPots = {};
+  var highlightPot = null;
+  var canvas, ctx;
+  var animFrame;
+
+  function initPots(){
+    pots = [];
+    for(var r=0;r<ROWS;r++){
+      for(var c=0;c<COLS;c++){
+        var idx = r*COLS+c;
+        var id = idx+1;
+        pots.push({
+          id:id,
+          code:'P-'+String(id).padStart(3,'0'),
+          row:r, col:c,
+          voltage:3.8+Math.random()*0.8,
+          temperature:950+Math.random()*30,
+          concentration:1.2+Math.random()*2.3,
+          effectProb:Math.random()*100,
+          status:'normal'
+        });
+      }
+    }
+    updateStatus();
+  }
+
+  function getConcentrationColor(conc){
+    if(conc>=2.5) return '#4CAF50';
+    if(conc>=1.8) return '#FFC107';
+    if(conc>=1.5) return '#FF9800';
+    return '#F44336';
+  }
+
+  function getStatusText(conc){
+    if(conc>=2.5) return '正常';
+    if(conc>=1.8) return '偏低';
+    if(conc>=1.5) return '极低';
+    return '危险';
+  }
+
+  function updateStatus(){
+    var normal=0,low=0,veryLow=0,critical=0;
+    pots.forEach(function(p){
+      if(p.concentration>=2.5){p.status='normal';normal++;}
+      else if(p.concentration>=1.8){p.status='low';low++;}
+      else if(p.concentration>=1.5){p.status='veryLow';veryLow++;}
+      else{p.status='critical';critical++;}
+    });
+    document.getElementById('statTotal').textContent=pots.length;
+    document.getElementById('statNormal').textContent=normal;
+    document.getElementById('statLow').textContent=low;
+    document.getElementById('statVeryLow').textContent=veryLow;
+    document.getElementById('statCritical').textContent=critical;
+  }
+
+  function setupCanvas(){
+    canvas=document.getElementById('workshop');
+    ctx=canvas.getContext('2d');
+    resizeCanvas();
+  }
+
+  function resizeCanvas(){
+    var totalW = LABEL_LEFT + COLS*(POT_W+GAP) - GAP + 20;
+    var totalH = LABEL_TOP + ROWS*(POT_H+GAP) - GAP + 20;
+    canvas.width = totalW;
+    canvas.height = totalH;
+  }
+
+  function drawRoundedRect(x,y,w,h,r,fill,stroke){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.lineTo(x+w-r,y);
+    ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+    ctx.lineTo(x+w,y+h-r);
+    ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+    ctx.lineTo(x+r,y+h);
+    ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+    ctx.lineTo(x,y+r);
+    ctx.quadraticCurveTo(x,y,x+r,y);
+    ctx.closePath();
+    if(fill){ctx.fillStyle=fill;ctx.fill();}
+    if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=2;ctx.stroke();}
+  }
+
+  var flashOn = true;
+  function render(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    flashOn = !flashOn;
+
+    // Column labels
+    ctx.font='11px Microsoft YaHei';
+    ctx.fillStyle='#6677aa';
+    ctx.textAlign='center';
+    for(var c=0;c<COLS;c++){
+      var cx = LABEL_LEFT + c*(POT_W+GAP) + POT_W/2;
+      ctx.fillText('Col '+(c+1),cx,14);
+    }
+
+    // Row labels
+    ctx.textAlign='right';
+    ctx.textBaseline='middle';
+    for(var r=0;r<ROWS;r++){
+      var ry = LABEL_TOP + r*(POT_H+GAP) + POT_H/2;
+      ctx.fillText('Row '+(r+1), LABEL_LEFT-8, ry);
+    }
+
+    // Pots
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    pots.forEach(function(p){
+      var x = LABEL_LEFT + p.col*(POT_W+GAP);
+      var y = LABEL_TOP + p.row*(POT_H+GAP);
+      var fillColor = getConcentrationColor(p.concentration);
+      var isFlash = p.effectProb > 80;
+      var isHighlight = highlightPot === p.id;
+      var strokeColor = null;
+
+      if(isFlash && flashOn){
+        strokeColor = '#F44336';
+      }
+      if(isHighlight){
+        strokeColor = '#00e5ff';
+        ctx.shadowColor='#00e5ff';
+        ctx.shadowBlur=12;
+      }
+
+      drawRoundedRect(x,y,POT_W,POT_H,RADIUS,fillColor,strokeColor);
+
+      if(isHighlight){
+        ctx.shadowColor='transparent';
+        ctx.shadowBlur=0;
+      }
+
+      ctx.font='bold 9px monospace';
+      ctx.fillStyle='rgba(0,0,0,0.7)';
+      ctx.fillText(p.code, x+POT_W/2, y+POT_H/2);
+    });
+
+    animFrame = requestAnimationFrame(render);
+  }
+
+  function getPotAt(mx,my){
+    for(var i=0;i<pots.length;i++){
+      var p=pots[i];
+      var x=LABEL_LEFT+p.col*(POT_W+GAP);
+      var y=LABEL_TOP+p.row*(POT_H+GAP);
+      if(mx>=x&&mx<=x+POT_W&&my>=y&&my<=y+POT_H) return p;
+    }
+    return null;
+  }
+
+  canvas=document.getElementById('workshop');
+  canvas.addEventListener('click',function(e){
+    var rect=canvas.getBoundingClientRect();
+    var scaleX=canvas.width/rect.width;
+    var scaleY=canvas.height/rect.height;
+    var mx=(e.clientX-rect.left)*scaleX;
+    var my=(e.clientY-rect.top)*scaleY;
+    var pot=getPotAt(mx,my);
+    if(pot) openModal(pot);
+  });
+
+  function openModal(pot){
+    document.getElementById('modalOverlay').classList.add('active');
+    document.getElementById('modalTitle').textContent=pot.code+' - '+getStatusText(pot.concentration);
+
+    var concClass = pot.concentration>=2.5?'green':pot.concentration>=1.8?'yellow':pot.concentration>=1.5?'orange':'red';
+    document.getElementById('modalInfo').innerHTML=
+      '<div class="info-card"><div class="info-label">电压 (V)</div><div class="info-value">'+pot.voltage.toFixed(2)+'</div></div>'+
+      '<div class="info-card"><div class="info-label">温度 (°C)</div><div class="info-value">'+pot.temperature.toFixed(1)+'</div></div>'+
+      '<div class="info-card"><div class="info-label">氧化铝浓度 (%)</div><div class="info-value '+concClass+'">'+pot.concentration.toFixed(2)+'</div></div>'+
+      '<div class="info-card"><div class="info-label">阳极效应概率 (%)</div><div class="info-value '+(pot.effectProb>80?'red':'')+'">'+pot.effectProb.toFixed(1)+'</div></div>';
+
+    fetchTrendData(pot.id);
+    fetchFeedings(pot.id);
+    drawVoltageChart(generateTrendData(pot.voltage,8));
+    drawCurrentChart(generateCurrentData(8));
+  }
+
+  function closeModal(){
+    document.getElementById('modalOverlay').classList.remove('active');
+  }
+  document.getElementById('modalClose').addEventListener('click',closeModal);
+  document.getElementById('modalOverlay').addEventListener('click',function(e){
+    if(e.target===this) closeModal();
+  });
+
+  function generateTrendData(base,hours){
+    var data=[];
+    var now=new Date();
+    for(var i=hours*4;i>=0;i--){
+      var t=new Date(now.getTime()-i*15*60000);
+      data.push({time:t, value:base+Math.sin(i*0.3)*0.4+(Math.random()-0.5)*0.2});
+    }
+    return data;
+  }
+
+  function generateCurrentData(hours){
+    var data=[];
+    var now=new Date();
+    for(var i=hours*4;i>=0;i--){
+      var t=new Date(now.getTime()-i*15*60000);
+      data.push({time:t, values:Array.from({length:10},function(_,j){return 280+Math.sin(i*0.2+j)*20+(Math.random()-0.5)*10;})});
+    }
+    return data;
+  }
+
+  function drawLineChart(canvasEl,datasets,yMin,yMax,yLabel,colors){
+    var c=document.getElementById(canvasEl);
+    var parent=c.parentElement;
+    c.width=parent.clientWidth-16;
+    c.height=200;
+    var cx=c.getContext('2d');
+    var W=c.width,H=c.height;
+    var padL=50,padR=16,padT=16,padB=30;
+    var chartW=W-padL-padR,chartH=H-padT-padB;
+
+    cx.fillStyle='#12122a';
+    cx.fillRect(0,0,W,H);
+
+    // Grid
+    cx.strokeStyle='rgba(255,255,255,0.06)';
+    cx.lineWidth=1;
+    for(var i=0;i<=5;i++){
+      var y=padT+chartH*i/5;
+      cx.beginPath();cx.moveTo(padL,y);cx.lineTo(padL+chartW,y);cx.stroke();
+      cx.fillStyle='#556688';
+      cx.font='10px sans-serif';
+      cx.textAlign='right';
+      cx.textBaseline='middle';
+      cx.fillText((yMax-(yMax-yMin)*i/5).toFixed(1),padL-6,y);
+    }
+
+    // X labels
+    if(datasets[0]&&datasets[0].length>0){
+      var step=Math.max(1,Math.floor(datasets[0].length/6));
+      cx.fillStyle='#556688';
+      cx.font='9px sans-serif';
+      cx.textAlign='center';
+      cx.textBaseline='top';
+      for(var i=0;i<datasets[0].length;i+=step){
+        var x=padL+chartW*i/(datasets[0].length-1);
+        var d=datasets[0][i].time;
+        cx.fillText(String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'),x,H-padB+6);
+      }
+    }
+
+    // Lines
+    datasets.forEach(function(data,di){
+      if(!data||data.length<2) return;
+      cx.beginPath();
+      cx.strokeStyle=colors[di%colors.length];
+      cx.lineWidth=1.5;
+      var vals=data.map(function(d){return di===0?d.value:d.values[di-1];});
+      vals.forEach(function(v,i){
+        var x=padL+chartW*i/(vals.length-1);
+        var y=padT+chartH*(1-(v-yMin)/(yMax-yMin));
+        y=Math.max(padT,Math.min(padT+chartH,y));
+        if(i===0) cx.moveTo(x,y); else cx.lineTo(x,y);
+      });
+      cx.stroke();
+    });
+  }
+
+  function drawVoltageChart(data){
+    drawLineChart('voltageChart',[data],2.5,5.5,'V',['#4fc3f7']);
+  }
+
+  function drawCurrentChart(data){
+    if(!data||data.length<2) return;
+    var colors=['#4fc3f7','#81c784','#fff176','#ff8a65','#ce93d8','#4dd0e1','#a5d6a7','#ffe082','#ffab91','#b39ddb'];
+    var datasets=colors.map(function(_,i){
+      return data.map(function(d){return {time:d.time,value:d.values[i]};});
+    });
+    drawLineChart('currentChart',datasets,250,330,'A',colors);
+  }
+
+  function fetchTrendData(potId){
+    fetch('/api/potdata/'+potId+'/trend').then(function(r){return r.json();}).then(function(data){
+      if(data&&data.voltageTrend) drawVoltageChart(data.voltageTrend);
+      if(data&&data.currentDistribution) drawCurrentChart(data.currentDistribution);
+    }).catch(function(){});
+  }
+
+  function fetchFeedings(potId){
+    fetch('/api/potdata/'+potId+'/feedings').then(function(r){return r.json();}).then(function(data){
+      renderFeedings(data);
+    }).catch(function(){
+      renderFeedings(generateFakeFeedings());
+    });
+  }
+
+  function generateFakeFeedings(){
+    var types=['常规下料','过量下料','紧急下料'];
+    var operators=['张三','李四','王五','赵六'];
+    var feedings=[];
+    var now=new Date();
+    for(var i=0;i<10;i++){
+      feedings.push({
+        feedTime:new Date(now.getTime()-i*3600000*Math.random()*3),
+        feedAmount:(10+Math.random()*20).toFixed(1),
+        feedType:types[Math.floor(Math.random()*3)],
+        operator:operators[Math.floor(Math.random()*4)]
+      });
+    }
+    return feedings;
+  }
+
+  function renderFeedings(data){
+    var tbody=document.getElementById('feedingsBody');
+    tbody.innerHTML='';
+    (data||[]).forEach(function(f){
+      var t=f.feedTime instanceof Date?f.feedTime:new Date(f.feedTime);
+      var ts=String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0')+':'+String(t.getSeconds()).padStart(2,'0');
+      var tr=document.createElement('tr');
+      tr.innerHTML='<td>'+ts+'</td><td>'+f.feedAmount+'</td><td>'+f.feedType+'</td><td>'+f.operator+'</td>';
+      tbody.appendChild(tr);
+    });
+  }
+
+  function addAlarm(alarm){
+    alarms.unshift(alarm);
+    renderAlarms();
+    playAlertSound();
+  }
+
+  function renderAlarms(){
+    var list=document.getElementById('alarmList');
+    document.getElementById('alarmCount').textContent=alarms.length;
+    document.getElementById('statAlarms').textContent=alarms.length;
+    if(alarms.length===0){
+      list.innerHTML='<div class="alarm-empty">暂无活跃报警</div>';
+      return;
+    }
+    list.innerHTML='';
+    alarms.forEach(function(a,i){
+      var div=document.createElement('div');
+      div.className='alarm-item level'+a.level;
+      var t=a.time instanceof Date?a.time:new Date(a.time);
+      var ts=String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0')+':'+String(t.getSeconds()).padStart(2,'0');
+      div.innerHTML=
+        '<div class="alarm-top">'+
+          '<div class="alarm-icon l'+a.level+'">'+(a.level===1?'&#9888;':'&#9888;')+'</div>'+
+          '<span class="alarm-pot">'+a.potCode+'</span>'+
+          '<span class="alarm-type">'+a.alarmType+'</span>'+
+        '</div>'+
+        '<div class="alarm-msg">'+a.message+'</div>'+
+        '<div class="alarm-time">'+ts+'</div>';
+      div.addEventListener('click',function(){
+        var pot=pots.find(function(p){return p.code===a.potCode;});
+        if(pot){
+          highlightPot=pot.id;
+          setTimeout(function(){highlightPot=null;},3000);
+        }
+      });
+      list.appendChild(div);
+    });
+  }
+
+  function playAlertSound(){
+    try{
+      var ac=new(window.AudioContext||window.webkitAudioContext)();
+      var osc=ac.createOscillator();
+      var gain=ac.createGain();
+      osc.connect(gain);
+      gain.connect(ac.destination);
+      osc.frequency.value=880;
+      osc.type='sine';
+      gain.gain.setValueAtTime(0.15,ac.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001,ac.currentTime+0.5);
+      osc.start(ac.currentTime);
+      osc.stop(ac.currentTime+0.5);
+    }catch(e){}
+  }
+
+  function handleAlarm(alarmId){
+    fetch('/api/potdata/alarms/'+alarmId+'/handle',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({handlerName:'WebUser'})
+    }).then(function(){
+      alarms=alarms.filter(function(a){return a.id!==alarmId;});
+      renderAlarms();
+    }).catch(function(){});
+  }
+
+  // SignalR
+  function initSignalR(){
+    try{
+      var conn=new signalR.HubConnectionBuilder().withUrl('/hubs/pot-monitor').withAutomaticReconnect().build();
+      conn.on('PotStatusUpdated',function(statusList){
+        if(Array.isArray(statusList)){
+          statusList.forEach(function(d){
+            var pot=pots.find(function(p){return p.id===d.potId;});
+            if(pot){
+              pot.voltage=d.lastVoltage||pot.voltage;
+              pot.temperature=d.potTemperature||pot.temperature;
+              pot.concentration=d.estimatedConcentration!==undefined?d.estimatedConcentration:pot.concentration;
+              pot.effectProb=d.anodeEffectProbability!==undefined?(d.anodeEffectProbability*100):pot.effectProb;
+            }
+          });
+          updateStatus();
+        }
+      });
+      conn.on('AlarmTriggered',function(alarm){
+        addAlarm({
+          id:alarm.id,
+          level:alarm.alarmLevel,
+          potCode:alarm.potCode,
+          alarmType:alarm.alarmType,
+          message:alarm.message,
+          time:alarm.createdAt
+        });
+      });
+      conn.on('AnodeEffectWarning',function(data){
+        var pot=pots.find(function(p){return p.id===data.potId;});
+        if(pot) pot.effectProb=(data.probability||0.85)*100;
+      });
+      conn.start().catch(function(e){console.warn('SignalR连接失败:',e);});
+    }catch(e){console.warn('SignalR初始化失败:',e);}
+  }
+
+  // Fetch initial data
+  function fetchInitialData(){
+    fetch('/api/potdata/status').then(function(r){return r.json();}).then(function(data){
+      if(Array.isArray(data)){
+        data.forEach(function(d){
+          var pot=pots.find(function(p){return p.id===d.potId;});
+          if(pot){
+            pot.voltage=d.lastVoltage||pot.voltage;
+            pot.temperature=d.potTemperature||pot.temperature;
+            pot.concentration=d.estimatedConcentration!==undefined?d.estimatedConcentration:pot.concentration;
+            pot.effectProb=d.anodeEffectProbability!==undefined?(d.anodeEffectProbability*100):pot.effectProb;
+          }
+        });
+        updateStatus();
+      }
+    }).catch(function(){});
+  }
+
+  // Clock
+  function updateClock(){
+    var now=new Date();
+    var y=now.getFullYear();
+    var m=String(now.getMonth()+1).padStart(2,'0');
+    var d=String(now.getDate()).padStart(2,'0');
+    var h=String(now.getHours()).padStart(2,'0');
+    var mi=String(now.getMinutes()).padStart(2,'0');
+    var s=String(now.getSeconds()).padStart(2,'0');
+    document.getElementById('headerTime').textContent=y+'-'+m+'-'+d+' '+h+':'+mi+':'+s;
+  }
+
+  // Simulate data changes for demo
+  function simulateData(){
+    setInterval(function(){
+      var idx=Math.floor(Math.random()*pots.length);
+      var p=pots[idx];
+      p.concentration=Math.max(0.8,Math.min(4.0,p.concentration+(Math.random()-0.5)*0.15));
+      p.voltage=Math.max(2.5,Math.min(5.5,p.voltage+(Math.random()-0.5)*0.05));
+      p.temperature=Math.max(930,Math.min(990,p.temperature+(Math.random()-0.5)*1.5));
+      p.effectProb=Math.max(0,Math.min(100,p.effectProb+(Math.random()-0.5)*5));
+      updateStatus();
+
+      if(p.concentration<1.5&&Math.random()>0.7){
+        addAlarm({id:Date.now(),level:1,potCode:p.code,alarmType:'浓度报警',message:'氧化铝浓度过低: '+p.concentration.toFixed(2)+'%',time:new Date()});
+      }
+      if(p.effectProb>80&&Math.random()>0.7){
+        addAlarm({id:Date.now()+1,level:2,potCode:p.code,alarmType:'阳极效应预警',message:'阳极效应概率: '+p.effectProb.toFixed(1)+'%',time:new Date()});
+      }
+    },3000);
+  }
+
+  // Init
+  window.addEventListener('load',function(){
+    setupCanvas();
+    initPots();
+    fetchInitialData();
+    initSignalR();
+    updateClock();
+    setInterval(updateClock,1000);
+    render();
+    simulateData();
+  });
+
+  window.addEventListener('resize',function(){
+    resizeCanvas();
+  });
+})();
+</script>
+</body>
+</html>

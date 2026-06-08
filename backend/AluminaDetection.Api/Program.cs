@@ -1,0 +1,96 @@
+using AluminaDetection.Api.Data;
+using AluminaDetection.Api.Hubs;
+using AluminaDetection.Api.Services;
+using Microsoft.EntityFrameworkCore;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+builder.Services.AddControllers();
+builder.Services.AddSignalR();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("DevCors", policy =>
+    {
+        policy.AllowAnyOrigin()
+              .AllowAnyMethod()
+              .AllowAnyHeader();
+    });
+});
+
+builder.Services.AddScoped<IPotDataProcessor, PotDataProcessor>();
+builder.Services.AddScoped<IVoltageFeatureExtractor, VoltageFeatureExtractor>();
+builder.Services.AddScoped<IAluminaConcentrationEstimator, AluminaConcentrationEstimator>();
+builder.Services.AddScoped<IAnodeEffectPredictor, AnodeEffectPredictor>();
+builder.Services.AddScoped<IFeedingControlService, FeedingControlService>();
+builder.Services.AddScoped<IAlarmService, AlarmService>();
+builder.Services.AddScoped<IMqttPublishService, MqttPublishService>();
+
+builder.Services.AddSingleton<PotDataProcessingHostedService>();
+builder.Services.AddHostedService(provider => provider.GetRequiredService<PotDataProcessingHostedService>());
+builder.Services.AddHostedService<ModelTrainingHostedService>();
+
+var app = builder.Build();
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
+await InitializeDatabaseAsync(app);
+
+app.UseCors("DevCors");
+app.UseRouting();
+app.MapControllers();
+app.MapHub<PotMonitorHub>("/hubs/pot-monitor");
+
+app.Run();
+
+static async Task InitializeDatabaseAsync(WebApplication app)
+{
+    using var scope = app.Services.CreateScope();
+    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+
+    try
+    {
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var hasPots = await dbContext.PotInfos.AnyAsync();
+        if (!hasPots)
+        {
+            logger.LogInformation("No pots found. Running sp_InitPotData...");
+            try
+            {
+                await dbContext.Database.ExecuteSqlRawAsync("EXEC sp_InitPotData");
+                logger.LogInformation("Pot data initialized successfully.");
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "sp_InitPotData not found, initializing pots manually...");
+                for (int i = 1; i <= 200; i++)
+                {
+                    dbContext.PotInfos.Add(new Models.PotInfo
+                    {
+                        PotCode = $"P-{i:D3}",
+                        RowIndex = ((i - 1) / 20) + 1,
+                        ColIndex = ((i - 1) % 20) + 1,
+                        Status = 1
+                    });
+                }
+                await dbContext.SaveChangesAsync();
+                logger.LogInformation("200 pots initialized manually.");
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Database initialization failed.");
+    }
+}
