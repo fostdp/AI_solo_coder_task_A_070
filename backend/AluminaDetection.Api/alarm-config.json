@@ -1,0 +1,13 @@
+{
+  "ConcentrationAlarmThreshold": 1.5,
+  "ConcentrationAlarmDurationMinutes": 5,
+  "ConcentrationAlarmDedupMinutes": 10,
+  "AnodeEffectProbabilityThreshold": 0.80,
+  "AnodeEffectAlarmDedupMinutes": 5,
+  "FeedingTriggerConcentration": 1.8,
+  "FeedingTargetConcentration": 2.5,
+  "FeedingMinAmountKg": 1.0,
+  "FeedingCooldownMinutes": 5,
+  "EffectQuenchPrimaryFeedKg": 3.0,
+  "EffectQuenchSecondaryFeedKg": 2.0
+}

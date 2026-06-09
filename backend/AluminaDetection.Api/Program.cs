@@ -1,3 +1,4 @@
+using AluminaDetection.Api.Config;
 using AluminaDetection.Api.Data;
 using AluminaDetection.Api.Hubs;
 using AluminaDetection.Api.Services;
@@ -17,19 +18,37 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("DevCors", policy =>
     {
-        policy.AllowAnyOrigin()
-              .AllowAnyMethod()
-              .AllowAnyHeader();
+        policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader();
     });
 });
 
-builder.Services.AddScoped<IPotDataProcessor, PotDataProcessor>();
-builder.Services.AddScoped<IVoltageFeatureExtractor, VoltageFeatureExtractor>();
-builder.Services.AddScoped<IAluminaConcentrationEstimator, AluminaConcentrationEstimator>();
-builder.Services.AddScoped<IAnodeEffectPredictor, AnodeEffectPredictor>();
-builder.Services.AddScoped<IFeedingControlService, FeedingControlService>();
-builder.Services.AddScoped<IAlarmService, AlarmService>();
-builder.Services.AddScoped<IMqttPublishService, MqttPublishService>();
+builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(Program).Assembly));
+
+builder.Services.AddSingleton<SvrConfig>(sp =>
+{
+    var config = new SvrConfig();
+    builder.Configuration.GetSection("Svr").Bind(config);
+    return config;
+});
+builder.Services.AddSingleton<RfConfig>(sp =>
+{
+    var config = new RfConfig();
+    builder.Configuration.GetSection("Rf").Bind(config);
+    return config;
+});
+builder.Services.AddSingleton<AlarmConfig>(sp =>
+{
+    var config = new AlarmConfig();
+    builder.Configuration.GetSection("Alarm").Bind(config);
+    return config;
+});
+
+builder.Services.AddSingleton<IZigBeeReceiver, ZigBeeReceiver>();
+builder.Services.AddSingleton<IVoltageFeatureExtractor, VoltageFeatureExtractor>();
+builder.Services.AddSingleton<IConcentrationEstimator, ConcentrationEstimator>();
+builder.Services.AddSingleton<IAnodeEffectPredictorService, AnodeEffectPredictorService>();
+builder.Services.AddSingleton<IAlarmController, AlarmControllerService>();
+builder.Services.AddSingleton<IMqttPublishService, MqttPublishService>();
 
 builder.Services.AddSingleton<PotDataProcessingHostedService>();
 builder.Services.AddHostedService(provider => provider.GetRequiredService<PotDataProcessingHostedService>());
@@ -65,28 +84,19 @@ static async Task InitializeDatabaseAsync(WebApplication app)
         var hasPots = await dbContext.PotInfos.AnyAsync();
         if (!hasPots)
         {
-            logger.LogInformation("No pots found. Running sp_InitPotData...");
-            try
+            logger.LogInformation("No pots found. Initializing 200 pots...");
+            for (int i = 1; i <= 200; i++)
             {
-                await dbContext.Database.ExecuteSqlRawAsync("EXEC sp_InitPotData");
-                logger.LogInformation("Pot data initialized successfully.");
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "sp_InitPotData not found, initializing pots manually...");
-                for (int i = 1; i <= 200; i++)
+                dbContext.PotInfos.Add(new Models.PotInfo
                 {
-                    dbContext.PotInfos.Add(new Models.PotInfo
-                    {
-                        PotCode = $"P-{i:D3}",
-                        RowIndex = ((i - 1) / 20) + 1,
-                        ColIndex = ((i - 1) % 20) + 1,
-                        Status = 1
-                    });
-                }
-                await dbContext.SaveChangesAsync();
-                logger.LogInformation("200 pots initialized manually.");
+                    PotCode = $"P-{i:D3}",
+                    RowIndex = ((i - 1) / 20) + 1,
+                    ColIndex = ((i - 1) % 20) + 1,
+                    Status = 1
+                });
             }
+            await dbContext.SaveChangesAsync();
+            logger.LogInformation("200 pots initialized.");
         }
     }
     catch (Exception ex)

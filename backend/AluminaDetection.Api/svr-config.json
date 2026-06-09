@@ -1,0 +1,28 @@
+{
+  "C": 1.0,
+  "Epsilon": 0.1,
+  "Gamma": 0.5,
+  "MaxTrainingSamples": 2000,
+  "MatchingTimeToleranceMinutes": 2.0,
+  "MinTrainingSamples": 5,
+  "OutputMin": 1.5,
+  "OutputMax": 4.0,
+  "SmoTolerance": 0.001,
+  "SmoMaxPasses": 100,
+  "SupportVectorThreshold": 1e-8,
+  "FeatureNames": [
+    "MeanVoltage", "StdVoltage", "Skewness", "Kurtosis",
+    "FrequencyPeak", "NoisePower",
+    "DominantFrequencyAmplitude", "SpectralEnergyRatio",
+    "HighFrequencyNoiseRatio", "SpectralCentroid", "SpectralBandwidth"
+  ],
+  "Heuristic": {
+    "Base": 3.0,
+    "StdVoltageFactor": -0.5,
+    "StdVoltageScale": 0.1,
+    "SkewnessFactor": -0.3,
+    "SkewnessScale": 0.5,
+    "HighFreqNoiseFactor": -0.4,
+    "SpectralEnergyFactor": 0.2
+  }
+}

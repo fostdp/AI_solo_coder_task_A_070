@@ -1,0 +1,26 @@
+{
+  "TreeCount": 10,
+  "MaxDepth": 5,
+  "MinSamplesLeaf": 5,
+  "MaxTrainingSamples": 5000,
+  "MinTrainingSamples": 10,
+  "RandomSeed": 42,
+  "EffectTimeWindowMinutes": 3.0,
+  "MinAccuracyForProduction": 0.70,
+  "AccuracyDropThreshold": 0.15,
+  "EvaluationWindowSize": 50,
+  "TrainingIntervalHours": 2.0,
+  "FeatureNames": [
+    "NoisePower", "StdVoltage", "FrequencyPeak", "MeanVoltage",
+    "DominantFrequencyAmplitude", "HighFrequencyNoiseRatio",
+    "SpectralEnergyRatio", "SpectralBandwidth"
+  ],
+  "Heuristic": {
+    "NoisePowerWeight": 2.0,
+    "NoisePowerOffset": 0.5,
+    "StdVoltageWeight": 1.5,
+    "StdVoltageOffset": 0.3,
+    "FrequencyPeakWeight": 0.5,
+    "HighFreqNoiseWeight": 3.0
+  }
+}

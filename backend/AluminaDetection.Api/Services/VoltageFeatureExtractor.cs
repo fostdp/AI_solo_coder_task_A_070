@@ -7,18 +7,21 @@ namespace AluminaDetection.Api.Services;
 
 public class VoltageFeatureExtractor : IVoltageFeatureExtractor
 {
-    private readonly AppDbContext _db;
+    private readonly IServiceScopeFactory _scopeFactory;
 
-    public VoltageFeatureExtractor(AppDbContext db)
+    public VoltageFeatureExtractor(IServiceScopeFactory scopeFactory)
     {
-        _db = db;
+        _scopeFactory = scopeFactory;
     }
 
     public async Task<VoltageFeature> ExtractFeaturesAsync(int potId, int windowMinutes)
     {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
         var windowEnd = DateTime.UtcNow;
         var windowStart = windowEnd.AddMinutes(-windowMinutes);
-        var readings = await _db.PotRealtimeData
+        var readings = await db.PotRealtimeData
             .Where(r => r.PotId == potId && r.RecordedAt >= windowStart && r.RecordedAt <= windowEnd)
             .OrderBy(r => r.RecordedAt)
             .Select(r => r.Voltage)
@@ -45,8 +48,8 @@ public class VoltageFeatureExtractor : IVoltageFeatureExtractor
                 SpectralBandwidth = 0,
                 ExtractedAt = DateTime.UtcNow
             };
-            _db.VoltageFeatures.Add(empty);
-            await _db.SaveChangesAsync();
+            db.VoltageFeatures.Add(empty);
+            await db.SaveChangesAsync();
             return empty;
         }
 
@@ -125,8 +128,8 @@ public class VoltageFeatureExtractor : IVoltageFeatureExtractor
             ExtractedAt = DateTime.UtcNow
         };
 
-        _db.VoltageFeatures.Add(feature);
-        await _db.SaveChangesAsync();
+        db.VoltageFeatures.Add(feature);
+        await db.SaveChangesAsync();
         return feature;
     }
 
