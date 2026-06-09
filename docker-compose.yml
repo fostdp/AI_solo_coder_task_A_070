@@ -1,0 +1,112 @@
+version: "3.9"
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: alumina-sqlserver
+    environment:
+      MSSQL_SA_PASSWORD: "Alumina@2024!Strong"
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql/data
+      - sqlserver_log:/var/opt/mssql/log
+      - sqlserver_backup:/var/opt/mssql/backup
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "Alumina@2024!Strong" -C -Q "SELECT 1" || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - alumina-net
+    restart: unless-stopped
+
+  mqtt-broker:
+    image: eclipse-mosquitto:2.0.18
+    container_name: alumina-mqtt
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./infrastructure/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./infrastructure/mosquitto/acl.conf:/mosquitto/config/acl.conf:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    healthcheck:
+      test: ["CMD", "mosquitto_pub", "-h", "localhost", "-t", "healthcheck", "-m", "ok", "-q", "1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - alumina-net
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: alumina-backend
+    environment:
+      - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=AluminaDetectionDB;User Id=sa;Password=Alumina@2024!Strong;TrustServerCertificate=True;
+      - Mqtt__Broker=mqtt-broker
+      - Mqtt__Port=1883
+      - Mqtt__MaxBurst=20
+      - Mqtt__RefillRatePerSecond=10
+      - ASPNETCORE_ENVIRONMENT=Production
+      - APPLICATIONINSIGHTS_CONNECTION_STRING=${APPINSIGHTS_CONNECTION_STRING:-}
+      - Serilog__WriteTo__1__Args__host=sqlserver
+      - Serilog__WriteTo__1__Args__database=AluminaDetectionDB
+      - Serilog__WriteTo__1__Args__username=sa
+      - Serilog__WriteTo__1__Args__password=Alumina@2024!Strong
+    ports:
+      - "5000:5000"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      mqtt-broker:
+        condition: service_healthy
+    volumes:
+      - backend_logs:/app/logs
+    networks:
+      - alumina-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/potdata/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  simulator:
+    build:
+      context: .
+      dockerfile: simulator/Dockerfile
+    container_name: alumina-simulator
+    environment:
+      - SIM_URL=http://backend:5000
+      - SIM_POTS=200
+      - SIM_INTERVAL=15
+      - SIM_SCENARIO=mixed
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - alumina-net
+    restart: unless-stopped
+    command: ["--url", "http://backend:5000", "--pots", "200", "--interval", "15", "--scenario", "mixed"]
+
+volumes:
+  sqlserver_data:
+  sqlserver_log:
+  sqlserver_backup:
+  mosquitto_data:
+  mosquitto_log:
+  backend_logs:
+
+networks:
+  alumina-net:
+    driver: bridge
